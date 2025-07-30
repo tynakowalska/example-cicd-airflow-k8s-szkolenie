@@ -1,0 +1,142 @@
+from datetime import datetime
+
+from airflow import DAG
+from airflow.operators.bash import BashOperator
+from airflow.providers.cncf.kubernetes.operators.pod import KubernetesPodOperator
+from kubernetes.client import models as k8s
+
+volume = k8s.V1Volume(
+    name="shared-data",
+    persistent_volume_claim=k8s.V1PersistentVolumeClaimVolumeSource(
+        claim_name="shared-data-pvc"
+    ),
+)
+
+volume_mount = k8s.V1VolumeMount(name="shared-data", mount_path="/shared")
+
+
+def create_k8s_task(task_name, run_id_task_id):
+    return KubernetesPodOperator(
+        image="{{ docker_image }}",
+        cmds=["python", "src/ml_pipeline.py"],
+        arguments=[
+            "--acidity-path",
+            "winequality-red-acidity.csv",
+            "--other-path",
+            "winequality-red-other.csv",
+            "--output-dir",
+            "/shared",
+            "--task",
+            task_name,
+            "--run-id",
+            {% raw %}"{{{{ ti.xcom_pull(task_ids='{}') }}}}".format(run_id_task_id){% endraw %},
+        ],
+        name=f"ml-pipeline-{task_name}",
+        task_id=f"ml_{task_name}",
+        get_logs=True,
+        container_resources={
+            "requests": {"cpu": "1", "memory": "512Mi"},
+            "limits": {"cpu": "2", "memory": "1Gi"},
+        },
+        volumes=[volume],
+        volume_mounts=[volume_mount],
+    )
+
+
+with DAG(
+    dag_id="ml_pipeline_cicd",
+    start_date=datetime(2025, 1, 1),
+    schedule_interval=None,
+    catchup=False,
+) as dag:
+    # BashOperator to generate run_id
+    run_id = BashOperator(
+        task_id="generate_run_id",
+        bash_command="tr -dc A-Za-z0-9 </dev/urandom | head -c 25; echo",
+        do_xcom_push=True,
+    )
+
+    load_data = create_k8s_task(
+        task_name="load_data",
+        run_id_task_id="generate_run_id",
+    )
+
+    merge_data = create_k8s_task(
+        task_name="merge_data",
+        run_id_task_id="generate_run_id",
+    )
+
+    explore_data = create_k8s_task(
+        task_name="explore_data",
+        run_id_task_id="generate_run_id",
+    )
+
+    split_dataset = create_k8s_task(
+        task_name="split_dataset",
+        run_id_task_id="generate_run_id",
+    )
+
+    select_features_train = create_k8s_task(
+        task_name="select_features_train",
+        run_id_task_id="generate_run_id",
+    )
+
+    select_features_test = create_k8s_task(
+        task_name="select_features_test",
+        run_id_task_id="generate_run_id",
+    )
+
+    fit_scaler = create_k8s_task(
+        task_name="fit_scaler",
+        run_id_task_id="generate_run_id",
+    )
+
+    scale_train = create_k8s_task(
+        task_name="scale_train",
+        run_id_task_id="generate_run_id",
+    )
+
+    scale_test = create_k8s_task(
+        task_name="scale_test",
+        run_id_task_id="generate_run_id",
+    )
+
+    train_model = create_k8s_task(
+        task_name="train_model",
+        run_id_task_id="generate_run_id",
+    )
+
+    predict_train = create_k8s_task(
+        task_name="predict_train",
+        run_id_task_id="generate_run_id",
+    )
+
+    predict_test = create_k8s_task(
+        task_name="predict_test",
+        run_id_task_id="generate_run_id",
+    )
+
+    evaluate_train = create_k8s_task(
+        task_name="evaluate_train",
+        run_id_task_id="generate_run_id",
+    )
+
+    evaluate_test = create_k8s_task(
+        task_name="evaluate_test",
+        run_id_task_id="generate_run_id",
+    )
+
+    run_id >> load_data
+    load_data >> merge_data
+    merge_data >> [explore_data, split_dataset]
+    split_dataset >> [select_features_train, select_features_test]
+
+    select_features_train >> fit_scaler
+    fit_scaler >> [scale_train, scale_test]
+
+    select_features_test >> scale_test
+    scale_train >> train_model
+    train_model >> [predict_train, predict_test]
+    scale_test >> predict_test
+    predict_train >> evaluate_train
+    predict_test >> evaluate_test

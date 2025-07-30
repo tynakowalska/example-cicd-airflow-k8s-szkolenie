@@ -1,0 +1,21 @@
+{
+  "random_state": 123,
+  "test_size": 0.3333,
+  "id_column": "id",
+  "target_column": "quality",
+  "feature_names": ["alcohol", "sulphates"],
+  "scaler": {
+    "type": "MinMaxScaler",
+    "parameters": {
+      "feature_range": [-1.0, 1.0]
+    }
+  },
+  "model": {
+    "parameters": {
+      "max_iter": 1000,
+      "C": 0.75,
+      "solver": "liblinear",
+      "penalty": "l1"
+    }
+  }
+}
